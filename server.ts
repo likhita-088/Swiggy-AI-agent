@@ -47,7 +47,7 @@ async function serveStatic(res: ServerResponse, urlPath: string) {
   }
 }
 
-const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+export async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
   try {
     // CORS (same-origin by default, but harmless to allow localhost dev)
     res.setHeader("access-control-allow-origin", "*");
@@ -97,8 +97,11 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
     console.error("Server error:", message);
     sendJson(res, 500, { error: message });
   }
-});
+}
 
-server.listen(PORT, "127.0.0.1", () => {
-  console.log(`Swiggy AI Agent demo running at http://127.0.0.1:${PORT}`);
-});
+if (process.env.VERCEL !== "1") {
+  const server = createServer(handler);
+  server.listen(PORT, "127.0.0.1", () => {
+    console.log(`Swiggy AI Agent demo running at http://127.0.0.1:${PORT}`);
+  });
+}
