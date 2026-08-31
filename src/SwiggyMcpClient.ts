@@ -20,8 +20,9 @@ const AUTH_SCOPE = "mcp:tools";
 const AUTH_HOST = "127.0.0.1";
 const AUTH_PATH = "/callback";
 const AUTH_TIMEOUT_MS = 5 * 60 * 1000;
+const IS_VERCEL = process.env.VERCEL === "1";
 
-interface StoredAuthState {
+export interface StoredAuthState {
   clientInformation?: OAuthClientInformationMixed;
   tokens?: OAuthTokens;
   codeVerifier?: string;
@@ -152,15 +153,28 @@ class SwiggyOAuthProvider implements OAuthClientProvider {
   private server?: ReturnType<typeof createServer>;
   private serverStarted = false;
   private expectedState?: string;
+  private isVercel = IS_VERCEL;
+  private lastAuthorizationUrl?: string;
+  private vercelCallbackUrl?: string;
 
   constructor(authStateFile: string, callbackPort: number, callbackPath: string, authorizationServerUrl: URL) {
     this.authStateFile = authStateFile;
     this.callbackPort = callbackPort;
     this.callbackPath = callbackPath;
     this.authorizationServerUrl = authorizationServerUrl;
+    
+    // For Vercel, use the Vercel project URL for callback
+    if (this.isVercel) {
+      const vercelUrl = process.env.VERCEL_URL || "localhost:3000";
+      const protocol = process.env.VERCEL ? "https" : "http";
+      this.vercelCallbackUrl = `${protocol}://${vercelUrl}/api/oauth-callback`;
+    }
   }
 
   get redirectUrl(): string {
+    if (this.isVercel && this.vercelCallbackUrl) {
+      return this.vercelCallbackUrl;
+    }
     return `http://${AUTH_HOST}:${this.callbackPort}${this.callbackPath}`;
   }
 
@@ -222,6 +236,19 @@ class SwiggyOAuthProvider implements OAuthClientProvider {
       throw new Error("Authorization flow already in progress.");
     }
 
+    this.lastAuthorizationUrl = sanitizeUrl(authorizationUrl);
+
+    // On Vercel, we can't start a local HTTP server
+    // Instead, we'll store the URL and throw an error
+    // The frontend/API will handle showing this to the user
+    if (this.isVercel) {
+      console.warn("OAuth authorization required on Vercel. URL:", this.lastAuthorizationUrl);
+      throw new Error(
+        `[OAUTH_REQUIRED]${this.lastAuthorizationUrl}`
+      );
+    }
+
+    // Local development: use the existing HTTP server approach
     const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
       try {
         if (!req.url) {
@@ -366,6 +393,16 @@ class SwiggyOAuthProvider implements OAuthClientProvider {
     await this.saveState();
   }
 
+  getLastAuthorizationUrl(): string | undefined {
+    return this.lastAuthorizationUrl;
+  }
+
+  setAuthorizationCode(code: string): void {
+    if (this.pendingAuthorization) {
+      this.pendingAuthorization.resolve(code);
+    }
+  }
+
   private async loadState(): Promise<void> {
     try {
       const raw = await readFile(this.authStateFile, "utf8");
@@ -376,6 +413,10 @@ class SwiggyOAuthProvider implements OAuthClientProvider {
   }
 
   private async saveState(): Promise<void> {
+    // On Vercel, don't try to write to filesystem
+    if (this.isVercel) {
+      return;
+    }
     const stateJson = JSON.stringify(this.authState, null, 2);
     await writeFile(this.authStateFile, stateJson, "utf8");
   }

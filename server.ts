@@ -81,8 +81,23 @@ export async function handler(req: IncomingMessage, res: ServerResponse): Promis
       const sessionId =
         typeof parsed.sessionId === "string" && parsed.sessionId ? parsed.sessionId : crypto.randomUUID();
 
-      const reply = await Agent.process(message, sessionId);
-      sendJson(res, 200, { reply, sessionId });
+      try {
+        const reply = await Agent.process(message, sessionId);
+        sendJson(res, 200, { reply, sessionId });
+      } catch (agentError) {
+        // Handle OAuth authorization errors on Vercel
+        if (agentError instanceof Error && agentError.message.startsWith("[OAUTH_REQUIRED]")) {
+          const authUrl = agentError.message.substring("[OAUTH_REQUIRED]".length);
+          sendJson(res, 401, {
+            error: "Authorization required",
+            requiresAuth: true,
+            authorizationUrl: authUrl,
+            sessionId
+          });
+          return;
+        }
+        throw agentError;
+      }
       return;
     }
 
