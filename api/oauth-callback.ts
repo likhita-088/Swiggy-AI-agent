@@ -74,8 +74,9 @@ export async function handleOAuthCallback(req: IncomingMessage, res: ServerRespo
     // Store the code for this session
     pendingCallbacks.set(state, { code, state });
 
-    // Store in Redis as well if available
-    await redisOAuthState.save(state, { state, authorizationCode: code } as any);
+    // Store in Redis with state as key so provider can retrieve it
+    const stateKey = `.swiggy-mcp-auth.json:vercel-oauth-code-${state}`;
+    await redisOAuthState.save(stateKey, { authorizationCode: code, state } as any);
 
     res.statusCode = 200;
     res.setHeader("content-type", "text/html; charset=utf-8");

@@ -1309,6 +1309,27 @@
           var data = await response.json();
 
           if (!response.ok) {
+            // Handle OAuth authorization requirement
+            if (response.status === 401 && data.requiresAuth && data.authorizationUrl) {
+              addMessage(
+                "Authorization Required\n\n" +
+                "Click the link below to authorize the application, then try your message again:\n\n" +
+                "🔐 " + data.authorizationUrl,
+                "agent"
+              );
+              
+              // Automatically open the authorization URL in a new window
+              try {
+                window.open(data.authorizationUrl, 'swiggy_auth', 'width=800,height=600');
+              } catch (openError) {
+                console.warn("Could not open auth window:", openError);
+              }
+              
+              setLoading(false);
+              messageInput.focus();
+              return;
+            }
+            
             throw new Error(data.error || "Request failed with status " + response.status);
           }
 

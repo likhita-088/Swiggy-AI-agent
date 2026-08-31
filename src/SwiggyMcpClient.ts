@@ -13,6 +13,7 @@ import type {
   OAuthTokens,
   OAuthClientMetadata
 } from "@modelcontextprotocol/sdk/shared/auth";
+import { redisOAuthState } from "./lib/RedisOAuthState.js";
 
 const DEFAULT_CALLBACK_PORT = process.env.SWIGGY_MCP_CALLBACK_PORT ? Number(process.env.SWIGGY_MCP_CALLBACK_PORT) : 3000;
 const AUTH_STATE_FILE = path.resolve(process.cwd(), ".swiggy-mcp-auth.json");
@@ -404,6 +405,24 @@ class SwiggyOAuthProvider implements OAuthClientProvider {
   }
 
   private async loadState(): Promise<void> {
+    if (this.isVercel) {
+      try {
+        // Load from Redis if available
+        const stateKey = `${this.authStateFile}:vercel-oauth`;
+        const redisState = await redisOAuthState.load(stateKey);
+        if (redisState && typeof redisState === "object") {
+          this.authState = redisState as StoredAuthState;
+        } else {
+          this.authState = {};
+        }
+      } catch (error) {
+        console.warn("Failed to load OAuth state from Redis:", error);
+        this.authState = {};
+      }
+      return;
+    }
+
+    // Local: use filesystem
     try {
       const raw = await readFile(this.authStateFile, "utf8");
       this.authState = JSON.parse(raw) as StoredAuthState;
@@ -413,10 +432,18 @@ class SwiggyOAuthProvider implements OAuthClientProvider {
   }
 
   private async saveState(): Promise<void> {
-    // On Vercel, don't try to write to filesystem
     if (this.isVercel) {
+      try {
+        // Save to Redis on Vercel
+        const stateKey = `${this.authStateFile}:vercel-oauth`;
+        await redisOAuthState.save(stateKey, this.authState);
+      } catch (error) {
+        console.warn("Failed to save OAuth state to Redis:", error);
+      }
       return;
     }
+
+    // Local: use filesystem
     const stateJson = JSON.stringify(this.authState, null, 2);
     await writeFile(this.authStateFile, stateJson, "utf8");
   }
@@ -424,6 +451,23 @@ class SwiggyOAuthProvider implements OAuthClientProvider {
   async waitForAuthorizationCode(): Promise<string> {
     if (!this.pendingAuthorization) {
       throw new Error("Authorization flow has not started.");
+    }
+
+    // On Vercel, throw error immediately - code should come via callback and Redis
+    if (this.isVercel) {
+      // Check if code is already available in Redis from callback
+      if (this.expectedState) {
+        const stateKey = `${this.authStateFile}:vercel-oauth-code-${this.expectedState}`;
+        try {
+          const redisData = await redisOAuthState.load(stateKey);
+          if ((redisData as any)?.authorizationCode) {
+            return (redisData as any).authorizationCode;
+          }
+        } catch (error) {
+          console.warn("Failed to get code from Redis:", error);
+        }
+      }
+      throw new Error("Authorization code not available. Please retry after authorizing.");
     }
 
     try {
