@@ -5,7 +5,7 @@ import path from "node:path";
 import { URL } from "node:url";
 import crypto from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { registerClient, discoverAuthorizationServerMetadata } from "@modelcontextprotocol/sdk/client/auth";
 import type { OAuthClientProvider, OAuthDiscoveryState } from "@modelcontextprotocol/sdk/client/auth";
 import type {
