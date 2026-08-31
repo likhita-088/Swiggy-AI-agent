@@ -6,7 +6,7 @@ import { URL } from "node:url";
 import crypto from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { registerClient, discoverAuthorizationServerMetadata } from "@modelcontextprotocol/sdk/client/auth";
+import { registerClient, discoverAuthorizationServerMetadata } from "@modelcontextprotocol/sdk/client/auth.js";
 import type { OAuthClientProvider, OAuthDiscoveryState } from "@modelcontextprotocol/sdk/client/auth";
 import type {
   OAuthClientInformationMixed,
@@ -26,6 +26,7 @@ interface StoredAuthState {
   tokens?: OAuthTokens;
   codeVerifier?: string;
   discoveryState?: OAuthDiscoveryState;
+  state?: string;
 }
 
 interface PendingAuthorization {
@@ -88,6 +89,14 @@ export class SwiggyMcpClient {
       if (error instanceof Error && error.name === "UnauthorizedError") {
         const authorizationCode = await this.provider.waitForAuthorizationCode();
         await this.transport.finishAuth(authorizationCode);
+
+        // The transport that initiated OAuth is already attached to this client.
+        // Recreate the connection so the newly persisted token is used from the start.
+        await this.transport.close();
+        this.transport = new StreamableHTTPClientTransport(this.mcpUrl, {
+          authProvider: this.provider
+        });
+        this.client = new Client({ name: "swiggy-mcp-client", version: "1.0.0" });
         await this.client.connect(this.transport);
         return;
       }
@@ -169,6 +178,8 @@ class SwiggyOAuthProvider implements OAuthClientProvider {
   async state(): Promise<string> {
     const state = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
     this.expectedState = state;
+    this.authState.state = state;
+    await this.saveState();
     return state;
   }
 
@@ -344,6 +355,15 @@ class SwiggyOAuthProvider implements OAuthClientProvider {
   async discoveryState(): Promise<OAuthDiscoveryState | undefined> {
     await this.loadState();
     return this.authState.discoveryState;
+  }
+
+  async resetForReauth(): Promise<void> {
+    this.authState.tokens = undefined;
+    this.authState.codeVerifier = undefined;
+    this.authState.discoveryState = undefined;
+    this.authState.state = undefined;
+    this.expectedState = undefined;
+    await this.saveState();
   }
 
   private async loadState(): Promise<void> {
