@@ -84,6 +84,10 @@ export class SwiggyMcpClient {
 
     await this.provider.clientInformation();
 
+    if (this.client.transport) {
+      return;
+    }
+
     try {
       await this.client.connect(this.transport);
       return;
